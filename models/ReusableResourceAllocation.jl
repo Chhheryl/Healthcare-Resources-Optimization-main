@@ -23,6 +23,51 @@ function reusable_resource_allocation(
 		sent_penalty::Real=0,
 		verbose::Bool=false,
 )
+	#= 
+	############
+	# REQUIRED #
+	############
+
+	initial_supply (Array{<:Real,1}):
+	A one-dimensional array containing the initial supply levels at each node.
+	
+	supply (Array{<:Real,2}):
+	A two-dimensional matrix indicating the supply available at each node over multiple time periods.
+	
+	demand (Array{<:Real,2}):
+	A two-dimensional matrix representing the demand required at each node over multiple time periods.
+	
+	adj_matrix (BitArray{2}):
+	A binary adjacency matrix that indicates whether a direct resource transfer is possible between two nodes (i.e., if there's a direct connection).
+
+	############
+	# Optional #
+	############
+	
+	obj_dir (Symbol default=:shortage):
+	Objective direction which can be either :shortage or :overflow, determining whether the focus is on minimizing resource shortages or managing overflows.
+	
+	send_new_only (Bool default=false):
+	A boolean that determines whether the model should consider only new supply for sending or cumulative available resources including initial supply.
+	
+	sendrecieve_switch_time (Int default=0):
+	The time lag between sending and receiving resources, affecting the availability timing in the model constraints.
+	
+	min_send_amt (Real default=0):
+	The minimum amount of resources that must be sent if any are to be sent, establishing a threshold for active resource transfer.
+	
+	smoothness_penalty (Real default=0):
+	A penalty for variability in the amount sent between time periods, used to encourage consistency in resource distribution.
+	
+	setup_cost (Real default=0):
+	Cost associated with setting up a transfer between nodes, likely relevant when first activating a resource path.
+	
+	sent_penalty (Real default=0):
+	A penalty applied to the total volume of resources sent, which can be used to discourage excessive transfers.
+	
+	verbose (Bool default=false):
+	Controls the output of solver messages, with false keeping the optimization process silent.
+	=#
 	N, T = size(supply)
 	@assert(size(initial_supply, 1) == N)
 	@assert(size(demand, 1) == N)
