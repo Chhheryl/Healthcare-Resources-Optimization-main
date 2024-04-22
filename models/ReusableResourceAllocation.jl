@@ -1,132 +1,113 @@
-{
- "cells": [
-  {
-   "cell_type": "code",
-   "execution_count": null,
-   "metadata": {},
-   "outputs": [],
-   "source": [
-    "module ReusableResourceAllocation\n",
-    "\n",
-    "using JuMP\n",
-    "using Gurobi\n",
-    "\n",
-    "using LinearAlgebra\n",
-    "using MathOptInterface\n",
-    "\n",
-    "export reusable_resource_allocation\n",
-    "\n",
-    "\n",
-    "function reusable_resource_allocation(\n",
-    "\t\tinitial_supply::Array{<:Real,1},\n",
-    "\t\tsupply::Array{<:Real,2},\n",
-    "\t\tdemand::Array{<:Real,2},\n",
-    "\t\tadj_matrix::BitArray{2};\n",
-    "\t\tobj_dir::Symbol=:shortage,\n",
-    "\t\tsend_new_only::Bool=false,\n",
-    "\t\tsendrecieve_switch_time::Int=0,\n",
-    "\t\tmin_send_amt::Real=0,\n",
-    "\t\tsmoothness_penalty::Real=0,\n",
-    "\t\tsetup_cost::Real=0,\n",
-    "\t\tsent_penalty::Real=0,\n",
-    "\t\tverbose::Bool=false,\n",
-    ")\n",
-    "\tN, T = size(supply)\n",
-    "\t@assert(size(initial_supply, 1) == N)\n",
-    "\t@assert(size(demand, 1) == N)\n",
-    "\t@assert(size(demand, 2) == T)\n",
-    "\t@assert(size(adj_matrix, 1) == N)\n",
-    "\t@assert(size(adj_matrix, 2) == N)\n",
-    "\t@assert(obj_dir in [:shortage, :overflow])\n",
-    "\n",
-    "\tmodel = Model(Gurobi.Optimizer)\n",
-    "\tif !verbose set_silent(model) end\n",
-    "\n",
-    "\t@variable(model, sent[1:N,1:N,1:T])\n",
-    "\t@variable(model, obj_dummy[1:N,1:T] >= 0)\n",
-    "\n",
-    "\tif min_send_amt <= 0\n",
-    "\t\t@constraint(model, sent .>= 0)\n",
-    "\telse\n",
-    "\t\t@constraint(model, [i=1:N,j=1:N,t=1:T], sent[i,j,t] in MOI.Semicontinuous(Float64(min_send_amt), Inf))\n",
-    "\tend\n",
-    "\n",
-    "\tobjective = @expression(model, sum(obj_dummy))\n",
-    "\tif sent_penalty > 0\n",
-    "\t\tadd_to_expression!(objective, sent_penalty*sum(sent))\n",
-    "\tend\n",
-    "\tif smoothness_penalty > 0\n",
-    "\t\t@variable(model, smoothness_dummy[i=1:N,j=1:N,t=1:T-1] >= 0)\n",
-    "\t\t@constraint(model, [t=1:T-1],  (sent[:,:,t] - sent[:,:,t+1]) .<= smoothness_dummy[:,:,t])\n",
-    "\t\t@constraint(model, [t=1:T-1], -(sent[:,:,t] - sent[:,:,t+1]) .<= smoothness_dummy[:,:,t])\n",
-    "\n",
-    "\t\tadd_to_expression!(objective, smoothness_penalty * sum(smoothness_dummy))\n",
-    "\t\tadd_to_expression!(objective, smoothness_penalty * sum(sent[:,:,1]))\n",
-    "\tend\n",
-    "\tif setup_cost > 0\n",
-    "\t\t@variable(model, setup_dummy[i=1:N,j=i+1:N], Bin)\n",
-    "\t\t@constraint(model, [i=1:N,j=i+1:N], [1-setup_dummy[i,j], sum(sent[i,j,:])+sum(sent[j,i,:])] in MOI.SOS1([1.0, 1.0]))\n",
-    "\t\tadd_to_expression!(objective, setup_cost*sum(setup_dummy))\n",
-    "\tend\n",
-    "\t@objective(model, Min, objective)\n",
-    "\n",
-    "\tif send_new_only\n",
-    "\t\t@constraint(model, [t=1:T],\n",
-    "\t\t\tsum(sent[:,:,t], dims=2) .<= max.(0, supply[:,t])\n",
-    "\t\t)\n",
-    "\telse\n",
-    "\t\t@constraint(model, [i=1:N,t=1:T],\n",
-    "\t\t\tsum(sent[i,:,t]) <=\n",
-    "\t\t\t\tinitial_supply[i]\n",
-    "\t\t\t\t+ sum(supply[i,1:t])\n",
-    "\t\t\t\t- sum(sent[i,:,1:t-1])\n",
-    "\t\t\t\t+ sum(sent[:,i,1:t-1])\n",
-    "\t\t)\n",
-    "\tend\n",
-    "\n",
-    "\tfor i = 1:N\n",
-    "\t\tfor j = 1:N\n",
-    "\t\t\tif ~adj_matrix[i,j]\n",
-    "\t\t\t\t@constraint(model, sum(sent[i,j,:]) .== 0)\n",
-    "\t\t\tend\n",
-    "\t\tend\n",
-    "\tend\n",
-    "\n",
-    "\tif sendrecieve_switch_time > 0\n",
-    "\t\t@constraint(model, [i=1:N,t=1:T-1],\n",
-    "\t\t\t[sum(sent[:,i,t]), sum(sent[i,:,t:min(t+sendrecieve_switch_time,T)])] in MOI.SOS1([1.0, 1.0])\n",
-    "\t\t)\n",
-    "\t\t@constraint(model, [i=1:N,t=1:T-1],\n",
-    "\t\t\t[sum(sent[:,i,t:min(t+sendrecieve_switch_time,T)]), sum(sent[i,:,t])] in MOI.SOS1([1.0, 1.0])\n",
-    "\t\t)\n",
-    "\tend\n",
-    "\n",
-    "\tflip_sign = (obj_dir == :shortage) ? 1 : -1\n",
-    "\tz1, z2 = (obj_dir == :shortage) ? (0, -1) : (-1, 0)\n",
-    "\t@constraint(model, [i=1:N,t=1:T],\n",
-    "\t\tobj_dummy[i,t] >= flip_sign * (\n",
-    "\t\t\tdemand[i,t] - (\n",
-    "\t\t\t\tinitial_supply[i]\n",
-    "\t\t\t\t+ sum(supply[i,1:t])\n",
-    "\t\t\t\t- sum(sent[i,:,1:t+z1])\n",
-    "\t\t\t\t+ sum(sent[:,i,1:t+z2])\n",
-    "\t\t\t)\n",
-    "\t\t)\n",
-    "\t)\n",
-    "\n",
-    "\toptimize!(model)\n",
-    "\treturn model\n",
-    "end\n",
-    "\n",
-    "end;"
-   ]
-  }
- ],
- "metadata": {
-  "language_info": {
-   "name": "python"
-  }
- },
- "nbformat": 4,
- "nbformat_minor": 2
-}
+module ReusableResourceAllocation
+
+using JuMP
+using Gurobi
+
+using LinearAlgebra
+using MathOptInterface
+
+export reusable_resource_allocation
+
+
+function reusable_resource_allocation(
+		initial_supply::Array{<:Real,1},
+		supply::Array{<:Real,2},
+		demand::Array{<:Real,2},
+		adj_matrix::BitArray{2};
+		obj_dir::Symbol=:shortage,
+		send_new_only::Bool=false,
+		sendrecieve_switch_time::Int=0,
+		min_send_amt::Real=0,
+		smoothness_penalty::Real=0,
+		setup_cost::Real=0,
+		sent_penalty::Real=0,
+		verbose::Bool=false,
+)
+	N, T = size(supply)
+	@assert(size(initial_supply, 1) == N)
+	@assert(size(demand, 1) == N)
+	@assert(size(demand, 2) == T)
+	@assert(size(adj_matrix, 1) == N)
+	@assert(size(adj_matrix, 2) == N)
+	@assert(obj_dir in [:shortage, :overflow])
+
+	model = Model(Gurobi.Optimizer)
+	if !verbose set_silent(model) end
+
+	@variable(model, sent[1:N,1:N,1:T])
+	@variable(model, obj_dummy[1:N,1:T] >= 0)
+
+	if min_send_amt <= 0
+		@constraint(model, sent .>= 0)
+	else
+		@constraint(model, [i=1:N,j=1:N,t=1:T], sent[i,j,t] in MOI.Semicontinuous(Float64(min_send_amt), Inf))
+	end
+
+	objective = @expression(model, sum(obj_dummy))
+	if sent_penalty > 0
+		add_to_expression!(objective, sent_penalty*sum(sent))
+	end
+	if smoothness_penalty > 0
+		@variable(model, smoothness_dummy[i=1:N,j=1:N,t=1:T-1] >= 0)
+		@constraint(model, [t=1:T-1],  (sent[:,:,t] - sent[:,:,t+1]) .<= smoothness_dummy[:,:,t])
+		@constraint(model, [t=1:T-1], -(sent[:,:,t] - sent[:,:,t+1]) .<= smoothness_dummy[:,:,t])
+
+		add_to_expression!(objective, smoothness_penalty * sum(smoothness_dummy))
+		add_to_expression!(objective, smoothness_penalty * sum(sent[:,:,1]))
+	end
+	if setup_cost > 0
+		@variable(model, setup_dummy[i=1:N,j=i+1:N], Bin)
+		@constraint(model, [i=1:N,j=i+1:N], [1-setup_dummy[i,j], sum(sent[i,j,:])+sum(sent[j,i,:])] in MOI.SOS1([1.0, 1.0]))
+		add_to_expression!(objective, setup_cost*sum(setup_dummy))
+	end
+	@objective(model, Min, objective)
+
+	if send_new_only
+		@constraint(model, [t=1:T],
+			sum(sent[:,:,t], dims=2) .<= max.(0, supply[:,t])
+		)
+	else
+		@constraint(model, [i=1:N,t=1:T],
+			sum(sent[i,:,t]) <=
+				initial_supply[i]
+				+ sum(supply[i,1:t])
+				- sum(sent[i,:,1:t-1])
+				+ sum(sent[:,i,1:t-1])
+		)
+	end
+
+	for i = 1:N
+		for j = 1:N
+			if ~adj_matrix[i,j]
+				@constraint(model, sum(sent[i,j,:]) .== 0)
+			end
+		end
+	end
+
+	if sendrecieve_switch_time > 0
+		@constraint(model, [i=1:N,t=1:T-1],
+			[sum(sent[:,i,t]), sum(sent[i,:,t:min(t+sendrecieve_switch_time,T)])] in MOI.SOS1([1.0, 1.0])
+		)
+		@constraint(model, [i=1:N,t=1:T-1],
+			[sum(sent[:,i,t:min(t+sendrecieve_switch_time,T)]), sum(sent[i,:,t])] in MOI.SOS1([1.0, 1.0])
+		)
+	end
+
+	flip_sign = (obj_dir == :shortage) ? 1 : -1
+	z1, z2 = (obj_dir == :shortage) ? (0, -1) : (-1, 0)
+	@constraint(model, [i=1:N,t=1:T],
+		obj_dummy[i,t] >= flip_sign * (
+			demand[i,t] - (
+				initial_supply[i]
+				+ sum(supply[i,1:t])
+				- sum(sent[i,:,1:t+z1])
+				+ sum(sent[:,i,1:t+z2])
+			)
+		)
+	)
+
+	optimize!(model)
+	return model
+end
+
+end;

@@ -43,6 +43,8 @@ function patient_nurse_allocation(
 	@assert(size(adj_matrix) == (N,N))
 	@assert(size(discharged_patients) == (N, T))
 
+	# L will be an array containing 'los' ones followed by 'T-los' zeros
+	# each value is the probablity of one still staying at hospital at a given time
 	L = nothing
 	if isa(los, Int)
 		L = vcat(ones(Int, los), zeros(Int, T-los))
@@ -61,19 +63,28 @@ function patient_nurse_allocation(
 	model = Model(Gurobi.Optimizer)
 	if !verbose set_silent(model) end
 
+	# patients sent & nurses sent 
 	@variable(model, sentpatients[1:N,1:N,1:T])
 	@variable(model, sentnurses[1:N,1:N,1:T])
+	#@variable(model, sentdisresource[1:N, 1:N, 1:T])
+	#@variable(model, sentreusableresource[1:N, 1:N, 1:T])
 
 	@variable(model, obj_dummy_patients[1:N,1:T] >= 0)
 	@variable(model, obj_dummy_nurses[1:N,1:T] >= 0)
+	#@variable(model, obj_dummy_disresource[1:N, 1:T] >= 0)
+	#@variable(model, obj_dummy_reusableresource[1:N, 1:T] >= 0)
 
 	# enforce minimum transfer amount if enabled
 	if min_send_amt <= 0
 		@constraint(model, sentpatients .>= 0)
 		@constraint(model, sentnurses .>= 0)
+		#@constraint(model,sentdisresource .>= 0)
+		#@constraint(model,sentreusableresource .>= 0)
 	else
 		@constraint(model, [i=1:N,j=1:N,t=1:T], sentpatients[i,j,t] in MOI.Semicontinuous(Float64(min_send_amt), Inf))
 		@constraint(model, [i=1:N,j=1:N,t=1:T], sentnurses[i,j,t] in MOI.Semicontinuous(Float64(min_send_amt), Inf))
+		#@constraint(model, [i=1:N,j=1:N,t=1:T], sentdisresource[i,j,t] in MOI.Semicontinuous(Float64(min_send_amt), Inf))
+		#@constraint(model, [i=1:N,j=1:N,t=1:T], sentreusableresource[i,j,t] in MOI.Semicontinuous(Float64(min_send_amt), Inf))
 	end
 
 	objective = @expression(model, 100.0 * sum(obj_dummy_nurses))
@@ -85,10 +96,14 @@ function patient_nurse_allocation(
 		) for i in 1:N, t in 1:T
 	]
 
+	# measure the severity weights for each ward. The less the weight, the greater the severity.
+	# If enabled, the contribution of 'obj_dummy_patients' is weighted based on the severity of ward overloads
 	if severity_weighting
 		max_load_null = [maximum(active_patients_null[i,:] / beds[i]) for i in 1:N]
+		# if the maximum load per bed is greater than 1, set the severity weight to 1
+		# else, set the severity weight to 10 (not severe so don't transfer it)
 		severity_weight = [max_load_null[i] > 1 ? 1.0 : 10.0 for i in 1:N]
-
+		
 		add_to_expression!(objective, dot(sum(obj_dummy_patients, dims=2), severity_weight))
 	else
 		add_to_expression!(objective, sum(obj_dummy_patients))
@@ -98,9 +113,12 @@ function patient_nurse_allocation(
 	if sent_penalty > 0
 		add_to_expression!(objective, sent_penalty*sum(sentpatients))
 		add_to_expression!(objective, sent_penalty*sum(sentnurses))
+		#add_to_expression!(objective, sent_penalty*sum(sentdisresource))
+		#add_to_expression!(objective, sent_penalty*sum(sentreusableresource))
 	end
 
 	# penalize non-smoothness in sent patients if enabled
+	# this is to ensure that it's feasible to plan ahead, fixing the setup amounts 
 	if smoothness_penalty > 0
 		@variable(model, smoothness_dummy[i=1:N,j=1:N,t=1:T-1] >= 0)
 		@constraint(model, [t=1:T-1],  (sentpatients[:,:,t] - sentpatients[:,:,t+1]) .<= smoothness_dummy[:,:,t])
