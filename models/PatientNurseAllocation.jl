@@ -433,6 +433,9 @@ function patient_nurse_block_allocation(
 		add_to_expression!(objective, nurse_load_penalty * sum(nurse_load_dummy))
 	end
 
+
+
+
 	@objective(model, Min, objective)
 	optimize!(model)
 
