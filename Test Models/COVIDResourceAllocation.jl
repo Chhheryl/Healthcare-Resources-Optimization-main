@@ -18,6 +18,7 @@ import .PatientAllocation: patient_redistribution
 import .PatientNurseAllocation: patient_nurse_allocation
 import .ReusableResourceAllocation: reusable_resource_allocation
 import .PatientNurseAllocationNew: patient_nurse_allocation_new
+
 import .ForecastData: forecast
 import .BedsData: n_beds
 import .GeographicData: adjacencies

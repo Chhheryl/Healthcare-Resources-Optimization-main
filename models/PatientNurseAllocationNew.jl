@@ -19,7 +19,8 @@ function patient_nurse_allocation_new(
     discharged_patients::Array{<:Real,2},
     admitted_patients::Array{<:Real,2},
     initial_nurses::Array{<:Real,1},
-    adj_matrix::BitArray{2};
+    adj_matrix::BitArray{2},
+    isolation_spot::Array{<:Real,1};
     los=11,
     nurse_days_per_patient_day::Real=2.0,
     sendreceive_switch_time::Int=0,
@@ -35,7 +36,6 @@ function patient_nurse_allocation_new(
     disallow_nurse_shortage_sent::Bool=false,
     disallow_nurse_shortage_newpatients::Bool=false,
     severity_weighting::Bool=false,
-    isolation_spot::Array{<:Real, 1},
     no_artificial_overflow::Bool=false,
     no_artificial_shortage::Bool=false,
     verbose::Bool=false,
