@@ -253,14 +253,16 @@ end
 
 
 if length(isolation_spot) > 0 
-    for i in isolation_spot
+    isolated_nodes = findall(isolation_spot .== 1)
+    non_isolated_nodes = findall(isolation_spot .== 0)
+    for i in isolated_nodes
         for t in 1:T
-            # Add terms for sent patients from other nodes to isolation spot i
-            add_to_expression!(objective, sum(100 * sentpatients[j, i, t] for j in 1:N))
-            # Add terms for sent patients from isolation spot i to other nodes
-            add_to_expression!(objective, sum(100 * sentpatients[i, j, t] for j in 1:N))
-            # Add terms for sent nurses from other nodes to isolation spot i
-            add_to_expression!(objective, sum(100 * sentnurses[j, i, t] for j in 1:N))
+            # Add terms for sent patients from noisolated nodes to isolation spot i
+            add_to_expression!(objective, sum(10000 * sentpatients[j, i, t] for j in non_isolated_nodes))
+            # Add terms for sent patients from isolation spot i to  noisolated nodes
+            add_to_expression!(objective, sum(10000 * sentpatients[i, j, t] for j in non_isolated_nodes))
+            # Add terms for sent nurses from noisolated nodes to isolation spot i
+            add_to_expression!(objective, sum(10000 * sentnurses[j, i, t] for j in non_isolated_nodes))
             add_to_expression!(objective, sum((-1) * obj_dummy_nurses[i,t]))
         end
     end
