@@ -26,6 +26,61 @@ function nurse_allocation(
 
 		verbose::Bool=false,
 )
+	#=
+	initial_nurses (Array{<Real,1}): 
+	An array representing the initial number of nurses available at each location or unit.
+	This is the starting point for the allocation process.
+
+	demand (Array{<Real,2}): 
+	A two-dimensional array indicating the number of nurses required at each location for each time period.
+	Each row corresponds to a location, and each column corresponds to a time period.
+
+	adj_matrix (BitArray{2}): 
+	A square binary matrix (adjacency matrix) that defines the connectivity between locations.
+	If adj_matrix[i, j] is true, nurses can be sent from location i to location j. 
+	This parameter is critical for defining which transfers are allowed.
+
+	------------------------------------------------------------------------------------------------------------
+	
+	sent_penalty (Real): 
+	A penalty added to the objective function for sending nurses between locations. 
+	This parameter discourages excessive transfers to minimize operational disruption and costs.
+
+	smoothness_penalty (Real): 
+	A penalty for large variations in the number of nurses sent between periods. 
+	This parameter aims to ensure a more consistent flow of nurse allocations over time, promoting stability in 
+	staffing levels.
+
+	no_artificial_shortage (Bool): 
+	A flag that, when set to true, ensures that no artificial nurse shortages are created due to nurse 
+	reallocation if the initial number of nurses at a location is already sufficient to meet the demand.
+
+	no_worse_shortage (Bool): 
+	When set, this flag ensures that the nurse shortage does not worsen due to redistribution.
+	If a location starts with fewer nurses than needed, the allocation won't allow reducing that 
+	number further through transfers.
+
+	fully_connected (Bool):
+	If set to true, this ignores the adjacency matrix and allows nurses to be sent between any 
+	two locations, treating the network as fully connected.
+
+	sendreceive_switch_time (Int): 
+	Defines a time window in which switching between sending and 
+	receiving nurses at a location is restricted. This can be used to model operational delays or 
+	synchronization requirements.
+
+	min_send_amt (Real): 
+	The minimum amount of nurses that must be sent if any are sent at all, ensuring that nurse transfers are not 
+	trivially small and thus operationally insignificant.
+
+	setup_cost (Real): 
+	A cost incurred for establishing a new transfer route between two locations. This could represent logistical, 
+	administrative, or other initial costs associated with starting a nurse transfer.
+
+	verbose (Bool):
+	Controls the output of solver and model-building information. If true, 
+	the model will display more detailed information during the optimization process.
+=#
 
 	###############
 	#### Setup ####
