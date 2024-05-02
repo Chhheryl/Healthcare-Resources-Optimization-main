@@ -7,7 +7,7 @@ using LinearAlgebra
 using Distributions
 using MathOptInterface
 
-export patient_nurse_allocation, patient_nurse_block_allocation
+export patient_nurse_allocation
 
 
 function patient_nurse_allocation(
@@ -62,15 +62,12 @@ function patient_nurse_allocation(
 	if !verbose set_silent(model) end
 
 	# patients sent & nurses sent 
-	@variable(model, sentpatients[1:N,1:N,1:T])
-	@variable(model, sentnurses[1:N,1:N,1:T])
-	#@variable(model, sentdisresource[1:N, 1:N, 1:T])
-	#@variable(model, sentreusableresource[1:N, 1:N, 1:T])
+	@variable(model, sentpatients[1:N,1:N,1:T] )
+	@variable(model, sentnurses[1:N,1:N,1:T] )
 
-	@variable(model, obj_dummy_patients[1:N,1:T] >= 0)
-	@variable(model, obj_dummy_nurses[1:N,1:T] >= 0)
-	#@variable(model, obj_dummy_disresource[1:N, 1:T] >= 0)
-	#@variable(model, obj_dummy_reusableresource[1:N, 1:T] >= 0)
+
+	@variable(model, obj_dummy[1:N,1:T] >= 0)
+	#@variable(model, obj_dummy_nurses[1:N,1:T] >= 0)
 
 	# enforce minimum transfer amount if enabled
 	if min_send_amt <= 0
@@ -85,32 +82,42 @@ function patient_nurse_allocation(
 		#@constraint(model, [i=1:N,j=1:N,t=1:T], sentreusableresource[i,j,t] in MOI.Semicontinuous(Float64(min_send_amt), Inf))
 	end
 
-	objective = @expression(model, sum(obj_dummy_nurses))
+	objective = @expression(model, sum(obj_dummy))
 
 	active_patients_null = [(
 			initial_patients[i]
-			- sum(discharged_patients[i,1:t])
+			- discharged_patients[i,t]
 			+ sum(L[t-t₁+1] * admitted_patients[i,t₁] for t₁ in 1:t)
 		) for i in 1:N, t in 1:T
 	]
+
+	# compute active nurses
+	@expression(model, active_nurses[i=1:N,t=0:T],
+		initial_nurses[i]
+		- sum(sentnurses[i,:,1:t])
+		+ sum(sentnurses[:,i,1:t])
+	)
+
+	# ensure the number of active nurses is non-negative
+	@constraint(model, [i=1:N,t=1:T], active_nurses[i,t] >= 0)
 
 
 	# measure the severity weights for each ward. The less the weight, the greater the severity.
 	# If enabled, the contribution of 'obj_dummy_patients' is weighted based on the severity of ward overloads
 	if severity_weighting
-		max_load_null = [maximum(active_patients_null[i,:] / initial_nurses[i]*(1/nurse_days_per_patient_day)) for i in 1:N]
+		max_load_null = [maximum(active_patients_null[i,t]*nurse_days_per_patient_day / active_nurses[i,t-1]) for i in 1:N, t in 1:T]
 		# if the maximum load per bed is greater than 1, set the severity weight to 1
 		# else, set the severity weight to 10 (not severe so don't transfer it)
 		severity_weight = [max_load_null[i] > 1 ? 1.0 : 10.0 for i in 1:N]
 		
-		add_to_expression!(objective, dot(sum(obj_dummy_patients, dims=2), severity_weight))
+		add_to_expression!(objective, dot(sum(obj_dummy, dims=2), severity_weight))
 	else
-		add_to_expression!(objective, sum(obj_dummy_patients))
+		add_to_expression!(objective, sum(obj_dummy))
 	end
 
 	# penalize total sent if enabled
 	if sent_penalty > 0
-		add_to_expression!(objective, sent_penalty*sum(sentpatients))
+		add_to_expression!(objective, sent_penalty*2*sum(sentpatients))
 		add_to_expression!(objective, sent_penalty*sum(sentnurses))
 		#add_to_expression!(objective, sent_penalty*sum(sentdisresource))
 		#add_to_expression!(objective, sent_penalty*sum(sentreusableresource))
@@ -129,22 +136,23 @@ function patient_nurse_allocation(
 
 	# add setup costs if enabled
 	if setup_cost > 0
-		@variable(model, setup_dummy_patients[i=1:N,j=i+1:N], Bin)
-		@constraint(model, [i=1:N,j=i+1:N], [1-setup_dummy_patients[i,j], sum(sentpatients[i,j,:])+sum(sentpatients[j,i,:])] in MOI.SOS1([1.0, 1.0]))
-		add_to_expression!(objective, setup_cost*sum(setup_dummy_patients))
+		@variable(model, setup_dummy[i=1:N,j=i+1:N], Bin)
+		@constraint(model, [i=1:N,j=i+1:N], [1-setup_dummy[i,j], sum(sentpatients[i,j,:])+sum(sentpatients[j,i,:]) + sum(sentnurses[i,j,:])+sum(sentnurses[j,i,:])] in MOI.SOS1([1.0, 1.0]))
+		add_to_expression!(objective, setup_cost*sum(setup_dummy))
 
-		@variable(model, setup_dummy_nurses[i=1:N,j=i+1:N], Bin)
-		@constraint(model, [i=1:N,j=i+1:N], [1-setup_dummy_nurses[i,j], sum(sentnurses[i,j,:])+sum(sentnurses[j,i,:])] in MOI.SOS1([1.0, 1.0]))
-		add_to_expression!(objective, setup_cost*sum(setup_dummy_nurses))
+		# @variable(model, setup_dummy_nurses[i=1:N,j=i+1:N], Bin)
+		# @constraint(model, [i=1:N,j=i+1:N], [1-setup_dummy_nurses[i,j], sum(sentnurses[i,j,:])+sum(sentnurses[j,i,:])] in MOI.SOS1([1.0, 1.0]))
+		# add_to_expression!(objective, setup_cost*sum(setup_dummy_nurses))
 	end
 
 	# only send patients between connected locations
 	for i = 1:N
 		@constraint(model, sentnurses[i,i,:] .== 0)
+		@constraint(model, sentpatients[i,i,:] .== 0)
 		for j = 1:N
 			if ~adj_matrix[i,j]
 				@constraint(model, sentpatients[i,j,:] .== 0)
-				# @constraint(model, sentnurses[i,j,:] .== 0)
+				@constraint(model, sentnurses[i,j,:] .== 0)
 			end
 		end
 	end
@@ -160,10 +168,11 @@ function patient_nurse_allocation(
 	# send new patients only
 	@constraint(model, [t=1:T], sum(sentpatients[:,:,t], dims=2) .<= admitted_patients[:,t])
 
+
 	# expression for the number of active patients
 	@expression(model, active_patients[i=1:N,t=1:T],
 		initial_patients[i]
-		- sum(discharged_patients[i,1:t])
+		- discharged_patients[i,t]
 		+ sum(L[t-t₁+1] * (
 			admitted_patients[i,t₁]
 			- sum(sentpatients[i,:,t₁])
@@ -173,19 +182,14 @@ function patient_nurse_allocation(
 	)
 
 	# ensure the number of active patients is non-negative
-	@constraint(model, [i=1:N,t=1:T], active_patients[i,t] >= 0)
+	#@constraint(model, [i=1:N,t=1:T], active_patients[i,t] >= 0)
 
-	# compute active nurses
-	@expression(model, active_nurses[i=1:N,t=0:T],
-		initial_nurses[i]
-		- sum(sentnurses[i,:,1:t])
-		+ sum(sentnurses[:,i,1:t])
-	)
+	
 
 	if no_artificial_overflow
 		for i in 1:N, t in 1:T
-			if active_patients_null[i,t] < initial_nurses[i]*(1/nurse_days_per_patient_day)
-				@constraint(model, active_patients[i,t] <= active_nurses[i]*(1/nurse_days_per_patient_day))
+			if active_patients_null[i,t] < active_nurses[i]*(1/nurse_days_per_patient_day)
+				@constraint(model, active_patients[i,t] <= active_nurses[i,t-1]*(1/nurse_days_per_patient_day))
 			end
 		end
 	end
@@ -197,12 +201,9 @@ function patient_nurse_allocation(
 		add_to_expression!(objective, balancing_penalty_patients * sum(balancing_dummy_patients))
 	end
 
-	# objective - patients
+	# objective 
 	@expression(model, patient_overflow[i=1:N,t=1:T], active_patients[i,t] - active_nurses[i,t]*(1/nurse_days_per_patient_day))
-	@constraint(model, [i=1:N,t=1:T], obj_dummy_patients[i,t] >= patient_overflow[i,t])
-
-	# @constraint(model, sentpatients .== 0)
-
+	@constraint(model, [i=1:N,t=1:T], obj_dummy[i,t] >= patient_overflow[i,t])
 
 	# compute nurse demand
 	@expression(model, nurse_demand[i=1:N,t=1:T], active_patients[i,t] * nurse_days_per_patient_day)
@@ -214,7 +215,7 @@ function patient_nurse_allocation(
 	@constraint(model, [i=1:N,t=1:T], active_nurses[i,t] >= 0.5 * initial_nurses[i])
 
 	# nurses objective
-	@constraint(model, [i=1:N,t=1:T], obj_dummy_nurses[i,t] >= nurse_demand[i,t] - active_nurses[i,t])
+	#@constraint(model, [i=1:N,t=1:T], obj_dummy_nurses[i,t] >= nurse_demand[i,t] - active_nurses[i,t])
 
 	nurse_demand_null = active_patients_null .* nurse_days_per_patient_day
 	if no_artificial_shortage
@@ -267,5 +268,5 @@ function patient_nurse_allocation(
 
 	optimize!(model)
 	return model
-end;
+end
 end;
