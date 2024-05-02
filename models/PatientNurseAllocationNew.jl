@@ -80,7 +80,7 @@ else
     @constraint(model, [i=1:N,j=1:N,t=1:T], sentnurses[i,j,t] in MOI.Semicontinuous(Float64(min_send_amt), Inf))
 end
 
-objective = @expression(model, 100.0 * sum(obj_dummy_nurses))
+objective = @expression(model, sum(obj_dummy_nurses))
 
 active_patients_null = [(
         initial_patients[i]
