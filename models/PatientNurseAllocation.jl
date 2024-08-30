@@ -117,7 +117,7 @@ function patient_nurse_allocation(
 
 	# penalize total sent if enabled
 	if sent_penalty > 0
-		add_to_expression!(objective, sent_penalty*2*sum(sentpatients))
+		add_to_expression!(objective, sent_penalty*sum(sentpatients))
 		add_to_expression!(objective, sent_penalty*sum(sentnurses))
 		#add_to_expression!(objective, sent_penalty*sum(sentdisresource))
 		#add_to_expression!(objective, sent_penalty*sum(sentreusableresource))
@@ -202,8 +202,8 @@ function patient_nurse_allocation(
 	end
 
 	# objective 
-	@expression(model, patient_overflow[i=1:N,t=1:T], active_patients[i,t] - active_nurses[i,t]*(1/nurse_days_per_patient_day))
-	@constraint(model, [i=1:N,t=1:T], obj_dummy[i,t] >= patient_overflow[i,t])
+	# @expression(model, patient_overflow[i=1:N,t=1:T], active_patients[i,t] - active_nurses[i,t]*(1/nurse_days_per_patient_day))
+	# @constraint(model, [i=1:N,t=1:T], obj_dummy[i,t] >= patient_overflow[i,t])
 
 	# compute nurse demand
 	@expression(model, nurse_demand[i=1:N,t=1:T], active_patients[i,t] * nurse_days_per_patient_day)
@@ -215,7 +215,7 @@ function patient_nurse_allocation(
 	@constraint(model, [i=1:N,t=1:T], active_nurses[i,t] >= 0.5 * initial_nurses[i])
 
 	# nurses objective
-	#@constraint(model, [i=1:N,t=1:T], obj_dummy_nurses[i,t] >= nurse_demand[i,t] - active_nurses[i,t])
+	@constraint(model, [i=1:N,t=1:T], obj_dummy[i,t] >= nurse_demand[i,t] - active_nurses[i,t])
 
 	nurse_demand_null = active_patients_null .* nurse_days_per_patient_day
 	if no_artificial_shortage

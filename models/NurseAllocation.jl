@@ -11,8 +11,8 @@ export nurse_allocation
 function nurse_allocation(
 		initial_nurses::Array{<:Real,1},
 		demand::Array{<:Real,2},
-		adj_matrix::BitArray{2};
-
+		adj_matrix::BitArray{2},
+		isolation_spot::Array{<:Real,1};
 		sent_penalty::Real=0,
 		smoothness_penalty::Real=0,
 
@@ -160,6 +160,9 @@ function nurse_allocation(
 		end
 	end
 
+	# active nurses ≧ 1/2 initial nurses
+	@constraint(model, [i=1:N,t=1:T], active_nurses[i,t] >= 0.5 * initial_nurses[i])
+
 	if min_send_amt <= 0
 		@constraint(model, sent .>= 0)
 	else
@@ -196,6 +199,17 @@ function nurse_allocation(
 		@variable(model, setup_dummy[i=1:N,j=i+1:N], Bin)
 		@constraint(model, [i=1:N,j=i+1:N], [1-setup_dummy[i,j], sum(sent[i,j,:])+sum(sent[j,i,:])] in MOI.SOS1([1.0, 1.0]))
 		add_to_expression!(objective, setup_cost*sum(setup_dummy))
+	end
+
+	if length(isolation_spot) > 0 
+		isolated_nodes = findall(isolation_spot .== 1)
+		non_isolated_nodes = findall(isolation_spot .== 0)
+		for i in isolated_nodes
+			# Add terms for sent nurses from isolated nodes to nonisolated nodes
+			add_to_expression!(objective, sum(1000 * sent[i, j, t] for j in non_isolated_nodes, t in 1:T))
+			#severity = [obj_dummy[i,t] > 0 ? 1.0 : 100.0 for i in 1:N]
+			add_to_expression!(objective, sum(obj_dummy[i,t] for t in 1:T))
+		end
 	end
 
 	###############

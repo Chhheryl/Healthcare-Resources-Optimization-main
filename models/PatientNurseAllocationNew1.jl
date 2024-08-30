@@ -202,8 +202,8 @@ function patient_nurse_allocation_new1(
 	end
 
 	# objective 
-	@expression(model, patient_overflow[i=1:N,t=1:T], active_patients[i,t] - active_nurses[i,t]*(1/nurse_days_per_patient_day))
-	@constraint(model, [i=1:N,t=1:T], obj_dummy[i,t] >= patient_overflow[i,t])
+	# @expression(model, patient_overflow[i=1:N,t=1:T], active_patients[i,t] - active_nurses[i,t]*(1/nurse_days_per_patient_day))
+	# @constraint(model, [i=1:N,t=1:T], obj_dummy[i,t] >= patient_overflow[i,t])
 
 	# compute nurse demand
 	@expression(model, nurse_demand[i=1:N,t=1:T], active_patients[i,t] * nurse_days_per_patient_day)
@@ -215,7 +215,7 @@ function patient_nurse_allocation_new1(
 	@constraint(model, [i=1:N,t=1:T], active_nurses[i,t] >= 0.5 * initial_nurses[i])
 
 	# nurses objective
-	#@constraint(model, [i=1:N,t=1:T], obj_dummy_nurses[i,t] >= nurse_demand[i,t] - active_nurses[i,t])
+	@constraint(model, [i=1:N,t=1:T], obj_dummy[i,t] >= nurse_demand[i,t] - active_nurses[i,t])
 
 	nurse_demand_null = active_patients_null .* nurse_days_per_patient_day
 	if no_artificial_shortage
@@ -275,7 +275,7 @@ function patient_nurse_allocation_new1(
 			# Add terms for sent nurses from isolated nodes to nonisolated nodes
 			add_to_expression!(objective, sum(1000 * sentnurses[i, j, t] for j in non_isolated_nodes, t in 1:T))
 			#severity = [obj_dummy[i,t] > 0 ? 1.0 : 100.0 for i in 1:N]
-			add_to_expression!(objective, sum(2*obj_dummy[i,t] for t in 1:T))
+			add_to_expression!(objective, sum(obj_dummy[i,t] for t in 1:T))
 		end
 	end
 	

@@ -173,7 +173,7 @@ function results_active_patients(
 
 	active = [(
 			initial_patients[i]
-			- sum(discharged_patients[i,1:t])
+			- discharged_patients[i,t]
 			+ sum(L[t-t₁+1] * (
 				admitted_patients[i,t₁]
 				- sum(sent[i,:,t₁])
@@ -184,7 +184,7 @@ function results_active_patients(
 	]
 	active_null = [(
 			initial_patients[i]
-			- sum(discharged_patients[i,1:t])
+			- discharged_patients[i,t]
 			+ sum(L[t-t₁+1] * admitted_patients[i,t₁] for t₁ in 1:t)
 		) for i in 1:N, t in 1:T
 	]
